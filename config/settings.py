@@ -36,7 +36,7 @@ if DEBUG:
     ALLOWED_HOSTS = ['*']
 
 # SECURITY: CSRF trusted origins for production
-CSRF_TRUSTED_ORIGINS = ['https://medilabengineering.onrender.com']
+CSRF_TRUSTED_ORIGINS = ['https://medilab-i98o.onrender.com']
 
 # Application definition
 
@@ -236,7 +236,7 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 
 # HTTPS redirect (only in production)
-SECURE_SSL_REDIRECT = not DEBUG
+# SECURE_SSL_REDIRECT = not DEBUG
 
 # HSTS (HTTP Strict Transport Security) - be careful, this is cached by browsers
 if not DEBUG:
