@@ -238,8 +238,7 @@ class EquipmentForm(forms.ModelForm):
 class DriverRequestForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Only show active drivers
-        self.fields['driver'].queryset = Driver.objects.filter(is_active=True)
+        self.fields['driver'].queryset = Driver.objects.filter(user__groups__name='Driver')
         # Apply form-control class to all fields and set min date
         for field_name, field in self.fields.items():
             if not isinstance(field.widget, forms.CheckboxSelectMultiple):
