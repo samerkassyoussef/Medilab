@@ -29,10 +29,19 @@
 
     <!-- Actions Bar -->
     <div class="detail-action-grid">
-        {% if user.is_staff or request.created_by == user %}
-        <a href="{% url 'request_update' request.pk %}" class="detail-action-btn btn-premium-primary">
-            <i class="fas fa-edit"></i> Edit Request
-        </a>
+        {% if request.created_by == user %}
+            {% if request.status == 'Open' %}
+            <a href="{% url 'request_update' request.pk %}" class="detail-action-btn btn-premium-primary">
+                <i class="fas fa-edit"></i> Edit Request
+            </a>
+            {% elif request.status == 'Scheduled' or request.status == 'In Progress' %}
+            <form method="post" action="{% url 'request_delete' request.pk %}" style="display:inline;" id="deleteRequestForm">
+                {% csrf_token %}
+                <button type="button" class="detail-action-btn" style="background:#ef4444;color:#fff;border-color:#ef4444;" onclick="confirmDelete()">
+                    <i class="fas fa-trash-alt"></i> Delete Request
+                </button>
+            </form>
+            {% endif %}
         {% endif %}
         
         {% if is_engineer %}
@@ -45,9 +54,9 @@
             <i class="fas fa-print"></i> Print Details
         </button>
         
-        {% if request.status == 'Open' and user.is_staff %}
+        {% if user.is_staff or is_engineering_manager %}
         <a href="{% url 'maintenance_assignment_create' %}?request_id={{ request.pk }}" class="detail-action-btn btn-premium-primary">
-            <i class="fas fa-calendar-check"></i> Schedule Request
+            <i class="fas fa-calendar-check"></i> Allocate Engineer
         </a>
         {% endif %}
 
@@ -180,7 +189,7 @@
                     {% endif %}
                 </div>
 
-                {% if is_engineer and request.billing_status == 'Billable' %}
+                {% if is_engineer or is_engineering_manager %}
                 <button type="button" class="detail-action-btn btn-premium-outline" style="width: 100%; border-color: #d97706; color: #d97706; margin-top: 1rem;" onclick="openPricingModal()">
                     <i class="fas fa-calculator"></i> Update Valuation
                 </button>
@@ -215,6 +224,12 @@
 </div>
 
 <script>
+    function confirmDelete() {
+        if (confirm('Are you sure you want to delete this request? This cannot be undone.')) {
+            document.getElementById('deleteRequestForm').submit();
+        }
+    }
+
     function openPricingModal() {
         document.getElementById('pricingModal').style.display = 'block';
     }

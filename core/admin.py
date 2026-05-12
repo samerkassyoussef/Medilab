@@ -53,11 +53,26 @@ class DriverAdmin(admin.ModelAdmin):
     search_fields = ('name', 'user__username')
     raw_id_fields = ('user',)
 
+def approve_trips(modeladmin, request, queryset):
+    queryset.update(status='Approved')
+approve_trips.short_description = 'Approve selected trip requests'
+
+def deny_trips(modeladmin, request, queryset):
+    queryset.update(status='Denied')
+deny_trips.short_description = 'Deny selected trip requests'
+
+def cancel_trips(modeladmin, request, queryset):
+    queryset.update(status='Cancelled')
+cancel_trips.short_description = 'Cancel selected trip requests'
+
 @admin.register(DriverRequest)
 class DriverRequestAdmin(admin.ModelAdmin):
-    list_display = ('id', 'requester', 'driver', 'date', 'status')
-    list_filter = ('status', 'date', 'driver', 'department')
-    search_fields = ('requester__username', 'location', 'admin_notes')
+    list_display = ('id', 'requester', 'driver', 'department', 'date', 'status', 'created_at')
+    list_filter = ('status', 'department', 'date', 'driver', 'vehicle_type')
+    search_fields = ('requester__username', 'requester__first_name', 'requester__last_name', 'location', 'client_name', 'admin_notes')
+    readonly_fields = ('created_at',)
+    actions = [approve_trips, deny_trips, cancel_trips]
+    list_per_page = 25
 
 @admin.register(MaintenanceRequest)
 class MaintenanceRequestAdmin(admin.ModelAdmin):

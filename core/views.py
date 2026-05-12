@@ -46,9 +46,9 @@ class DashboardView(DriverRedirectMixin, LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         user = self.request.user
         
-        # Read is_engineer from session — the is_engineer context processor already
-        # populated it (and cached it in the session) so we NEVER need a DB query here.
+        # Read role flags from session — context processors already cached them.
         is_engineer = self.request.session.get('is_engineer', False)
+        is_engineering_manager = self.request.session.get('is_engineering_manager', False)
         engineer_profile = None
         if is_engineer:
             try:
@@ -204,8 +204,38 @@ class DashboardView(DriverRedirectMixin, LoginRequiredMixin, TemplateView):
             'today_year': today.year,
             'selected_date': selected_date,
             'upcoming_visits': visits_list,
-            'is_engineer': is_engineer
+            'is_engineer': is_engineer,
+            'is_engineering_manager': is_engineering_manager,
         })
+
+        if is_engineering_manager or user.is_staff:
+            context['open_requests_for_allocation'] = (
+                MaintenanceRequest.objects
+                .filter(status='Open')
+                .select_related('created_by')
+                .only(
+                    'id', 'facility_name', 'urgency', 'location',
+                    'created_at', 'contact_name', 'service_type',
+                    'created_by__username', 'created_by__first_name', 'created_by__last_name'
+                )
+                .order_by(
+                    # Emergency < High < Medium < Low (DESC alphabetically doesn't work,
+                    # so map via a Case expression via Python sort instead)
+                )
+            )
+            # Sort by urgency priority
+            urgency_order = {'Emergency': 0, 'High': 1, 'Medium': 2, 'Low': 3}
+            context['open_requests_for_allocation'] = sorted(
+                context['open_requests_for_allocation'],
+                key=lambda r: (urgency_order.get(r.urgency, 9), r.created_at)
+            )[:8]
+
+            context['manager_stats'] = {
+                'open_requests': MaintenanceRequest.objects.filter(status='Open').count(),
+                'in_progress': MaintenanceRequest.objects.filter(status='In Progress').count(),
+                'scheduled': MaintenanceRequest.objects.filter(status='Scheduled').count(),
+                'active_engineers': Engineer.objects.filter(is_active=True).count(),
+            }
 
         return context
 
@@ -603,8 +633,11 @@ class MaintenanceRequestListView(DriverRedirectMixin, LoginRequiredMixin, ListVi
             'created_by__first_name', 'created_by__last_name'
         )
         
-        # Filtering
-        if not self.request.user.is_staff:
+        # Filtering — staff and Engineering Managers see all requests
+        is_engineering_manager = self.request.session.get('is_engineering_manager')
+        if is_engineering_manager is None:
+            is_engineering_manager = self.request.user.groups.filter(name='Engineering Manager').exists()
+        if not self.request.user.is_staff and not is_engineering_manager:
             queryset = queryset.filter(created_by=self.request.user)
         
         # "For Me" Filter (Toggle)
@@ -654,11 +687,17 @@ class MaintenanceRequestListView(DriverRedirectMixin, LoginRequiredMixin, ListVi
         
         return self.render_to_response(self.get_context_data())
 
-class MaintenanceRequestCreateView(DriverRedirectMixin, LoginRequiredMixin, CreateView):
+class MaintenanceRequestCreateView(DriverRedirectMixin, LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = MaintenanceRequest
     form_class = MaintenanceRequestForm
     template_name = 'core/request_form.html'
     success_url = reverse_lazy('request_list')
+
+    def test_func(self):
+        # Officers can only request logistics (driver) trips, not engineering requests
+        if self.request.user.groups.filter(name='Officer').exists():
+            return False
+        return True
 
     def get_context_data(self, **kwargs):
         data = super().get_context_data(**kwargs)
@@ -726,12 +765,9 @@ class MaintenanceRequestUpdateView(DriverRedirectMixin, LoginRequiredMixin, User
 
     def test_func(self):
         obj = self.get_object()
-        # Allow if Admin OR Creator OR Assigned Engineer
-        is_admin = self.request.user.is_staff
-        is_creator = obj.created_by == self.request.user
-        is_assigned = obj.assignments.filter(engineer__user=self.request.user).exists()
-        
-        return is_admin or is_creator or is_assigned
+        if obj.status != 'Open':
+            return False
+        return obj.created_by == self.request.user
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs(); kwargs['user'] = self.request.user
@@ -769,14 +805,27 @@ class MaintenanceRequestUpdateView(DriverRedirectMixin, LoginRequiredMixin, User
             return redirect(self.success_url)
         return self.render_to_response(self.get_context_data(form=form))
 
+@login_required
+@require_POST
+def maintenance_request_delete(request, pk):
+    mr = get_object_or_404(MaintenanceRequest, pk=pk)
+    if mr.created_by != request.user:
+        return JsonResponse({'success': False, 'message': 'Permission denied.'}, status=403)
+    if mr.status not in ('Scheduled', 'In Progress'):
+        return JsonResponse({'success': False, 'message': 'Only assigned or scheduled requests can be deleted this way.'}, status=400)
+    mr.delete()
+    return redirect('request_list')
+
+
 @require_POST
 def update_pricing_ajax(request):
     if not request.user.is_authenticated:
         return JsonResponse({'success': False, 'message': 'Unauthorized'}, status=403)
     
-    # Check if user is Engineer
-    if not request.user.groups.filter(name='Engineer').exists():
-        return JsonResponse({'success': False, 'message': 'Only Engineers can update pricing.'}, status=403)
+    # Check if user is Engineer or Engineering Manager
+    is_eng = request.user.groups.filter(name__in=['Engineer', 'Engineering Manager']).exists()
+    if not is_eng:
+        return JsonResponse({'success': False, 'message': 'Only Engineers and Engineering Managers can update pricing.'}, status=403)
 
     request_id = request.POST.get('request_id')
     price = request.POST.get('price')
@@ -950,10 +999,14 @@ class DriverSchedulingView(LoginRequiredMixin, ListView):
 
         linked = self._linked_driver()
         is_driver_user = linked is not None  # True for Driver-group users
+        is_managing_officer = self.request.session.get('is_managing_officer')
+        if is_managing_officer is None:
+            is_managing_officer = self.request.user.groups.filter(name='Managing Officer').exists()
 
         context.update({
             'active_driver_count': active_driver_count,
-            'is_admin': self.request.user.is_staff and not is_driver_user,
+            'is_admin': (self.request.user.is_staff or is_managing_officer) and not is_driver_user,
+            'is_managing_officer': is_managing_officer,
             'is_driver_user': is_driver_user,
             'calendar_weeks': calendar_weeks,
             'shift_days': list(shift_days),
@@ -994,10 +1047,16 @@ class DriverRequestUpdateView(DriverRedirectMixin, LoginRequiredMixin, UpdateVie
     success_url = reverse_lazy('driver_scheduling')
 
     def get_queryset(self):
-        # Users can edit their own, staff can edit any
-        if self.request.user.is_staff:
+        user = self.request.user
+        # Staff and Managing Officers can edit any request
+        is_managing_officer = user.groups.filter(name='Managing Officer').exists()
+        if user.is_staff or is_managing_officer:
             return DriverRequest.objects.all()
-        return DriverRequest.objects.filter(requester=self.request.user)
+        # Officers and PST cannot edit any request (even their own)
+        if user.groups.filter(name__in=['Officer', 'PST']).exists():
+            return DriverRequest.objects.none()
+        # All other roles (Sales, Procurement, Engineer, Engineering Manager) can edit their own
+        return DriverRequest.objects.filter(requester=user)
 
 # --- ENGINEER SCHEDULING ---
 
@@ -1014,20 +1073,28 @@ class EngineerSchedulingView(DriverRedirectMixin, LoginRequiredMixin, ListView):
                 queryset = queryset.filter(date=selected_date)
             except (ValueError, TypeError):
                 pass
+
+        if self.request.GET.get('for_me') == '1':
+            try:
+                queryset = queryset.filter(engineer__user=self.request.user)
+            except Exception:
+                queryset = queryset.none()
+
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         import calendar
         from datetime import date, timedelta
-        
+
         today = date.today()
         year = int(self.request.GET.get('year', today.year))
         month = int(self.request.GET.get('month', today.month))
-        
+        for_me = self.request.GET.get('for_me') == '1'
+
         cal = calendar.Calendar(firstweekday=0)
         month_days_raw = cal.monthdayscalendar(year, month)
-        
+
         calendar_weeks = []
         for week in month_days_raw:
             week_data = []
@@ -1042,22 +1109,19 @@ class EngineerSchedulingView(DriverRedirectMixin, LoginRequiredMixin, ListView):
                         'is_today': today.year == year and today.month == month and today.day == day
                     })
             calendar_weeks.append(week_data)
-        
-        shift_days = MaintenanceAssignment.objects.filter(
-            date__year=year, 
-            date__month=month
-        ).values_list('date__day', flat=True).distinct()
-        
-        month_assignments_qs = MaintenanceAssignment.objects.filter(
-            date__year=year,
-            date__month=month
-        ).select_related('engineer', 'maintenance_request')
-        
+
+        month_qs_base = MaintenanceAssignment.objects.filter(date__year=year, date__month=month)
+        if for_me:
+            month_qs_base = month_qs_base.filter(engineer__user=self.request.user)
+
+        shift_days = month_qs_base.values_list('date__day', flat=True).distinct()
+        month_assignments_qs = month_qs_base.select_related('engineer', 'maintenance_request')
+
         serialized_assignments = []
         for ass in month_assignments_qs:
             start_dt = datetime.datetime.combine(ass.date, ass.start_time)
             end_dt = datetime.datetime.combine(ass.date, ass.end_time)
-            
+
             serialized_assignments.append({
                 'id': ass.id,
                 'title': f"{ass.maintenance_request.facility_name or 'Request'} (#MR-{ass.maintenance_request.id})",
@@ -1069,10 +1133,15 @@ class EngineerSchedulingView(DriverRedirectMixin, LoginRequiredMixin, ListView):
                 'day': ass.date.day,
                 'request_id': ass.maintenance_request.id,
             })
-        
+
+        is_engineering_manager = self.request.user.groups.filter(name='Engineering Manager').exists()
+        is_engineer = self.request.user.groups.filter(name='Engineer').exists()
         context.update({
             'engineers': Engineer.objects.filter(is_active=True),
-            'is_admin': self.request.user.is_staff,
+            'is_admin': self.request.user.is_staff or is_engineering_manager,
+            'is_engineering_manager': is_engineering_manager,
+            'is_engineer': is_engineer,
+            'for_me': for_me,
             'calendar_weeks': calendar_weeks,
             'shift_days': list(shift_days),
             'current_month': month,
@@ -1089,11 +1158,14 @@ class EngineerSchedulingView(DriverRedirectMixin, LoginRequiredMixin, ListView):
             self.template_name = 'core/partials/engineer_scheduling_partial.html'
         return self.render_to_response(self.get_context_data())
 
-class MaintenanceAssignmentCreateView(DriverRedirectMixin, LoginRequiredMixin, CreateView):
+class MaintenanceAssignmentCreateView(DriverRedirectMixin, LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = MaintenanceAssignment
     form_class = MaintenanceAssignmentForm
     template_name = 'core/maintenance_assignment_form.html'
     success_url = reverse_lazy('engineer_scheduling')
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.groups.filter(name='Engineering Manager').exists()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1118,11 +1190,14 @@ class MaintenanceAssignmentCreateView(DriverRedirectMixin, LoginRequiredMixin, C
             mr.save()
         return response
 
-class MaintenanceAssignmentUpdateView(DriverRedirectMixin, LoginRequiredMixin, UpdateView):
+class MaintenanceAssignmentUpdateView(DriverRedirectMixin, LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = MaintenanceAssignment
     form_class = MaintenanceAssignmentForm
     template_name = 'core/maintenance_assignment_form.html'
     success_url = reverse_lazy('engineer_scheduling')
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.groups.filter(name='Engineering Manager').exists()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1131,22 +1206,16 @@ class MaintenanceAssignmentUpdateView(DriverRedirectMixin, LoginRequiredMixin, U
         return context
 
     def get_queryset(self):
-        if self.request.user.is_staff:
-            return MaintenanceAssignment.objects.all()
-        # For engineers, maybe they can only see their own? For now, allow staff to edit any.
         return MaintenanceAssignment.objects.all()
-
-    def form_valid(self, form):
-        # If a non-staff user edits, revert to pending for re-approval
-        if not self.request.user.is_staff:
-            form.instance.status = 'Pending'
-        return super().form_valid(form)
 
 @require_POST
 def driver_request_action(request, pk):
-    if not request.user.is_staff:
+    is_managing_officer = request.user.groups.filter(name='Managing Officer').exists()
+    can_manage = request.user.is_staff or is_managing_officer
+
+    if not can_manage:
         return JsonResponse({'success': False, 'message': 'Permission denied.'}, status=403)
-    
+
     driver_request = get_object_or_404(DriverRequest, pk=pk)
     action = request.POST.get('action')
     notes = request.POST.get('notes', '')
@@ -1158,14 +1227,16 @@ def driver_request_action(request, pk):
     elif action == 'request_edit':
         driver_request.status = 'Edit Requested'
     elif action == 'cancel':
-        # Requesters can cancel their own, or admin can cancel any
-        if not request.user.is_staff and driver_request.requester != request.user:
-            return JsonResponse({'success': False, 'message': 'Permission denied.'}, status=403)
         driver_request.status = 'Cancelled'
-    
+    elif action == 'delete':
+        driver_request.delete()
+        return JsonResponse({'success': True})
+    else:
+        return JsonResponse({'success': False, 'message': 'Unknown action.'}, status=400)
+
     driver_request.admin_notes = notes
     driver_request.save()
-    
+
     return JsonResponse({'success': True})
 
 def get_driver_occupancy(request):

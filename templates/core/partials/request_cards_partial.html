@@ -40,7 +40,7 @@
 
     <div class="request-card-footer">
         <a href="{% url 'request_detail' request_item.pk %}" class="footer-link">View Details</a>
-        {% if user.is_staff or request_item.created_by == user %}
+        {% if request_item.created_by == user %}
         <a href="{% url 'request_update' request_item.pk %}" class="footer-edit-link" onclick="event.stopPropagation();">
             <i class="fas fa-pen" style="font-size: 0.75rem;"></i> Edit
         </a>

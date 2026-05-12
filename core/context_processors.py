@@ -15,6 +15,10 @@ def user_roles(request):
             'is_driver': False,
             'is_sales': False,
             'is_procurement': False,
+            'is_engineering_manager': False,
+            'is_officer': False,
+            'is_managing_officer': False,
+            'is_pst': False,
         }
 
     def _get_role(key, group_name):
@@ -29,6 +33,10 @@ def user_roles(request):
         'is_driver': _get_role('is_driver', 'Driver'),
         'is_sales': _get_role('is_sales', 'Sales'),
         'is_procurement': _get_role('is_procurement', 'Procurement'),
+        'is_engineering_manager': _get_role('is_engineering_manager', 'Engineering Manager'),
+        'is_officer': _get_role('is_officer', 'Officer'),
+        'is_managing_officer': _get_role('is_managing_officer', 'Managing Officer'),
+        'is_pst': _get_role('is_pst', 'PST'),
     }
 
 
@@ -57,7 +65,10 @@ def notification_counts(request):
     open_maintenance_count = MaintenanceRequest.objects.filter(status='Open').count()
 
     open_driver_request_count = 0
-    if request.user.is_staff:
+    is_managing_officer = request.session.get('is_managing_officer')
+    if is_managing_officer is None:
+        is_managing_officer = request.user.groups.filter(name='Managing Officer').exists()
+    if request.user.is_staff or is_managing_officer:
         open_driver_request_count = DriverRequest.objects.filter(
             status__in=['Pending', 'Edit Requested']
         ).count()

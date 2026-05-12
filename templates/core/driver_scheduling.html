@@ -247,6 +247,9 @@
                         <button id="eventModalCancelBtn" type="button" class="btn-action-small cancel" style="display:none; border: 1px solid #e2e8f0;">
                             <i class="fas fa-ban"></i> Cancel
                         </button>
+                        <button id="eventModalDeleteBtn" type="button" class="btn-action-small" style="display:none; border: 1px solid #fca5a5; color: #dc2626; background: #fef2f2;">
+                            <i class="fas fa-trash-alt"></i> Delete
+                        </button>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="button" class="btn-action-small" data-bs-dismiss="modal" style="border: 1px solid #e2e8f0; color: #475569;">Close</button>
@@ -279,6 +282,8 @@ const serverYear = {{ current_year }};
 const requestsData = JSON.parse(document.getElementById('month-requests-data').textContent);
 const currentUserId = {{ request.user.id }};
 const isStaff = {{ request.user.is_staff|yesno:"true,false" }};
+const isManagingOfficer = {{ is_managing_officer|yesno:"true,false" }};
+const canManageLogistics = isStaff || isManagingOfficer;
 
 // --- Dynamic Driver Color System ---
 const DRIVER_PALETTE = [
@@ -1183,29 +1188,31 @@ function showEventDetails(e) {
     } else { durRow.style.display = 'none'; }
 
     const notesRow = document.getElementById('eventModalNotesRow');
-    if (e.adminNotes && isStaff) {
+    if (e.adminNotes && canManageLogistics) {
         notesRow.style.display = '';
         document.getElementById('eventModalNotes').textContent = e.adminNotes;
     } else { notesRow.style.display = 'none'; }
 
-    // Edit button: owner or staff, only when not yet approved
     const editBtn = document.getElementById('eventModalEditBtn');
     const isOwner = e.requester_id === currentUserId;
     const isPending = e.status === 'Pending' || e.status === 'Edit Requested';
-    if ((isOwner || isStaff) && isPending) {
+
+    // Edit button: only staff and Managing Officers can edit (not just any owner)
+    if (canManageLogistics && isPending) {
         editBtn.style.display = 'inline-flex';
         editBtn.href = `/scheduling/request/${e.id}/edit/`;
     } else {
         editBtn.style.display = 'none';
     }
 
-    // Admin action buttons
+    // Admin action buttons (approve / deny)
     const approveBtn = document.getElementById('eventModalApproveBtn');
     const denyBtn = document.getElementById('eventModalDenyBtn');
     const cancelBtn = document.getElementById('eventModalCancelBtn');
+    const deleteBtn = document.getElementById('eventModalDeleteBtn');
     const modal = document.getElementById('eventDetailsModal');
 
-    if (isStaff && isPending) {
+    if (canManageLogistics && isPending) {
         approveBtn.style.display = 'inline-flex';
         denyBtn.style.display = 'inline-flex';
         approveBtn.onclick = () => { modal.classList.remove('show'); handleAction(e.id, 'approve'); };
@@ -1215,11 +1222,20 @@ function showEventDetails(e) {
         denyBtn.style.display = 'none';
     }
 
-    if ((isOwner || isStaff) && e.status !== 'Cancelled' && e.status !== 'Completed') {
+    // Cancel: managing officers and staff can cancel any; owners can cancel their own pending
+    if (canManageLogistics && e.status !== 'Cancelled' && e.status !== 'Completed') {
         cancelBtn.style.display = 'inline-flex';
         cancelBtn.onclick = () => { modal.classList.remove('show'); handleAction(e.id, 'cancel'); };
     } else {
         cancelBtn.style.display = 'none';
+    }
+
+    // Delete: only staff and Managing Officers
+    if (canManageLogistics) {
+        deleteBtn.style.display = 'inline-flex';
+        deleteBtn.onclick = () => { modal.classList.remove('show'); handleAction(e.id, 'delete'); };
+    } else {
+        deleteBtn.style.display = 'none';
     }
 
     modal.classList.add('show');
@@ -1342,8 +1358,10 @@ function isToday(d) {
 }
 // Handling existing action logic
 function handleAction(requestId, action) {
-    // Check for cancel action
     if (action === 'cancel' && !confirm("Are you sure you want to cancel this trip?")) {
+        return;
+    }
+    if (action === 'delete' && !confirm("Permanently delete this trip request? This cannot be undone.")) {
         return;
     }
 

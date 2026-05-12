@@ -19,7 +19,12 @@
             </div>
         </div>
         <div class="hero-actions">
-             <a href="{% url 'request_list' %}" class="btn-hero-secondary">
+            {% if is_engineering_manager or user.is_staff %}
+            <a href="{% url 'engineer_scheduling' %}" class="btn-hero-primary">
+                <i class="fas fa-calendar-check"></i> Scheduling
+            </a>
+            {% endif %}
+            <a href="{% url 'request_list' %}" class="btn-hero-secondary">
                 <i class="fas fa-list"></i> Request Board
             </a>
         </div>
@@ -31,6 +36,69 @@
         <!-- Main Content Column -->
         <div class="content-col">
             
+            {% if is_engineering_manager or user.is_staff %}
+            <!-- Engineering Manager: Open Requests Needing Allocation -->
+            <div class="section-header-row">
+                <h2 class="section-title">Open Requests — Needs Allocation</h2>
+                <a href="{% url 'request_list' %}?status=Open" class="btn-section-action" style="white-space: nowrap;">
+                    <i class="fas fa-list-alt"></i> View All
+                </a>
+            </div>
+
+            {% if open_requests_for_allocation %}
+            <div class="card-stack" style="margin-bottom: 2rem;">
+                {% for req in open_requests_for_allocation %}
+                <div class="trip-card" onclick="location.href='{% url 'request_detail' req.pk %}';">
+                    <div class="trip-header">
+                        <span class="trip-id">#MR-{{ req.id }}</span>
+                        <span class="trip-status urgency-{{ req.urgency|lower }}">{{ req.urgency|upper }}</span>
+                    </div>
+                    <div class="trip-route">
+                        <span class="route-city">{{ req.facility_name }}</span>
+                        <span class="route-arrow">→</span>
+                        <span class="route-dest">{{ req.get_location_display|default:req.location }}</span>
+                    </div>
+                    <div class="trip-details-row">
+                        <div class="detail-item">
+                            <i class="far fa-calendar-alt"></i>
+                            <div class="detail-text">
+                                <span class="label">Reported</span>
+                                <span class="value">{{ req.created_at|date:"M d, Y" }}</span>
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-tools"></i>
+                            <div class="detail-text">
+                                <span class="label">Service Type</span>
+                                <span class="value">{{ req.service_type|default:"General"|truncatechars:20 }}</span>
+                            </div>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-user-tag"></i>
+                            <div class="detail-text">
+                                <span class="label">Contact</span>
+                                <span class="value">{{ req.contact_name|default:"-" }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="trip-actions">
+                        <a href="{% url 'maintenance_assignment_create' %}?request_id={{ req.pk }}" class="btn-card-action allocate" onclick="event.stopPropagation();">
+                            <i class="fas fa-user-plus"></i> Allocate Engineer
+                        </a>
+                        <a href="{% url 'request_detail' req.pk %}" class="btn-card-action edit" onclick="event.stopPropagation();">
+                            <i class="far fa-eye"></i> View
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state-panel" style="margin-bottom: 2rem;">
+                <i class="fas fa-check-double"></i>
+                <p>All requests have been allocated.</p>
+            </div>
+            {% endif %}
+
             <!-- Section Title -->
             <div class="section-header-row">
                 <h2 class="section-title">Service Reports</h2>
@@ -38,6 +106,15 @@
                     <i class="fas fa-list-alt"></i> View Reports
                 </a>
             </div>
+            {% else %}
+            <!-- Section Title -->
+            <div class="section-header-row">
+                <h2 class="section-title">Service Reports</h2>
+                <a href="{% url 'report_list' %}" class="btn-section-action" style="white-space: nowrap;">
+                    <i class="fas fa-list-alt"></i> View Reports
+                </a>
+            </div>
+            {% endif %}
             
             <!-- Recent Reports Cards -->
             {% if recent_reports %}
@@ -233,7 +310,34 @@
 
             <!-- Stats Summary Widget -->
             <div class="widget-card">
-                 <div class="widget-header">
+                {% if is_engineering_manager or user.is_staff %}
+                <div class="widget-header">
+                    <h3>Engineering Overview</h3>
+                </div>
+                <div class="summary-stats">
+                    <div class="stat-row">
+                        <span class="stat-label"><i class="fas fa-inbox" style="color:#ef4444;margin-right:0.4rem;"></i>Open (Unallocated)</span>
+                        <span class="stat-val" style="color:#ef4444;">{{ manager_stats.open_requests }}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label"><i class="fas fa-calendar-check" style="color:#2563eb;margin-right:0.4rem;"></i>Scheduled</span>
+                        <span class="stat-val">{{ manager_stats.scheduled }}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label"><i class="fas fa-wrench" style="color:#f59e0b;margin-right:0.4rem;"></i>In Progress</span>
+                        <span class="stat-val">{{ manager_stats.in_progress }}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label"><i class="fas fa-user-cog" style="color:#10b981;margin-right:0.4rem;"></i>Active Engineers</span>
+                        <span class="stat-val">{{ manager_stats.active_engineers }}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label"><i class="fas fa-route" style="color:#7c3aed;margin-right:0.4rem;"></i>Visits (Week)</span>
+                        <span class="stat-val">{{ stats.visits_this_week }}</span>
+                    </div>
+                </div>
+                {% else %}
+                <div class="widget-header">
                     <h3>Logistics Summary</h3>
                 </div>
                 <div class="summary-stats">
@@ -242,14 +346,15 @@
                         <span class="stat-val">{{ stats.my_pending }}</span>
                     </div>
                     <div class="stat-row">
-                         <span class="stat-label">Open Requests</span>
+                        <span class="stat-label">Open Requests</span>
                         <span class="stat-val">{{ stats.open_requests }}</span>
                     </div>
-                     <div class="stat-row">
-                         <span class="stat-label">Visits (Week)</span>
+                    <div class="stat-row">
+                        <span class="stat-label">Visits (Week)</span>
                         <span class="stat-val">{{ stats.visits_this_week }}</span>
                     </div>
                 </div>
+                {% endif %}
             </div>
 
         </div>
@@ -565,6 +670,8 @@
     .btn-card-action.edit { background: #f1f5f9; color: var(--text-dark); border: 1px solid #e2e8f0; }
     .btn-card-action.edit:hover { background: #e2e8f0; }
     .btn-card-action.cancel { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
+    .btn-card-action.allocate { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .btn-card-action.allocate:hover { background: #dbeafe; }
 
     /* WIDGET CARD (Sidebar) */
     .widget-card {

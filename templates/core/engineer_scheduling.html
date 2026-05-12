@@ -21,15 +21,29 @@
                 </div>
             </div>
             <div class="header-actions">
+                {% if is_engineer %}
+                <div style="display: flex; gap: 0.4rem; margin-right: 1rem;">
+                    <a href="{% url 'engineer_scheduling' %}{% if selected_date %}?date={{ selected_date }}{% endif %}"
+                       style="padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; text-decoration: none; border: 1.5px solid {% if not for_me %}#4f46e5{% else %}#e2e8f0{% endif %}; background: {% if not for_me %}#4f46e5{% else %}#f8fafc{% endif %}; color: {% if not for_me %}#fff{% else %}#64748b{% endif %}; display: inline-flex; align-items: center; gap: 0.4rem;">
+                        <i class="fas fa-users"></i> All
+                    </a>
+                    <a href="{% url 'engineer_scheduling' %}?for_me=1{% if selected_date %}&date={{ selected_date }}{% endif %}"
+                       style="padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600; text-decoration: none; border: 1.5px solid {% if for_me %}#4f46e5{% else %}#e2e8f0{% endif %}; background: {% if for_me %}#4f46e5{% else %}#f8fafc{% endif %}; color: {% if for_me %}#fff{% else %}#64748b{% endif %}; display: inline-flex; align-items: center; gap: 0.4rem;">
+                        <i class="fas fa-user-check"></i> For Me
+                    </a>
+                </div>
+                {% endif %}
                 {% if selected_date %}
-                <a href="{% url 'engineer_scheduling' %}" class="btn" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; padding: 0.75rem 1.25rem; border-radius: 12px; font-weight: 600; text-decoration: none; margin-right: 1rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                <a href="{% url 'engineer_scheduling' %}{% if for_me %}?for_me=1{% endif %}" class="btn" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; padding: 0.75rem 1.25rem; border-radius: 12px; font-weight: 600; text-decoration: none; margin-right: 1rem; display: inline-flex; align-items: center; gap: 0.5rem;">
                     <i class="fas fa-times"></i> Clear Filter
                 </a>
                 {% endif %}
+                {% if user.is_staff or is_engineering_manager %}
                 <a href="{% url 'maintenance_assignment_create' %}" class="btn-create-modern" style="background: var(--primary-color);">
                     <i class="fas fa-plus"></i>
                     <span>New Assignment</span>
                 </a>
+                {% endif %}
             </div>
         </div>
 
@@ -282,7 +296,11 @@ function renderMonthView() {
                 const chip = document.createElement('div');
                 chip.className = `event-chip ${ENGINEER_COLORS[e.engineer] || DEFAULT_COLOR}`;
                 chip.textContent = `${e.engineer.split(' ')[0]}: ${e.title}`;
+                {% if user.is_staff or is_engineering_manager %}
                 chip.onclick = (ev) => { ev.stopPropagation(); window.location.href = `/engineering/scheduling/${e.id}/edit/`; };
+                {% else %}
+                chip.onclick = (ev) => { ev.stopPropagation(); window.location.href = `/requests/${e.request_id}/`; };
+                {% endif %}
                 container.appendChild(chip);
             });
             cell.appendChild(container);

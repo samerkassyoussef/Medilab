@@ -1,7 +1,8 @@
 from django import forms
 import datetime
-from .models import ServiceReport, Product, Equipment, ReportItem, MaintenanceRequest, MaintenanceRequestEquipment, DriverRequest, Driver, MaintenanceAssignment
+from .models import ServiceReport, Product, Equipment, ReportItem, MaintenanceRequest, MaintenanceRequestEquipment, DriverRequest, Driver, MaintenanceAssignment, Engineer
 from django.forms import inlineformset_factory
+from django.contrib.auth.models import Group
 
 SERVICE_TYPE_CHOICES = [
     ('Preventive Maintenance', 'Preventive Maintenance'),
@@ -35,15 +36,15 @@ class MaintenanceRequestForm(forms.ModelForm):
         user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
         if user and not user.is_staff:
-            # Everyone can set Billing Status
-            # Only staff can change the official Status
-            # Engineers and Staff can set Estimated Cost (Desired Pricing)
+            is_engineering_manager = user.groups.filter(name='Engineering Manager').exists()
             is_engineer = user.groups.filter(name='Engineer').exists()
-            
-            restricted_fields = ['status']
-            if not is_engineer:
+
+            restricted_fields = []
+            if not is_engineering_manager:
+                restricted_fields.append('status')
+            if not is_engineer and not is_engineering_manager:
                 restricted_fields.append('estimated_cost')
-                
+
             for field in restricted_fields:
                 if field in self.fields:
                     del self.fields[field]
@@ -359,6 +360,23 @@ class MaintenanceAssignmentForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Ensure every user in the Engineer group has a linked Engineer profile
+        try:
+            engineer_group = Group.objects.get(name='Engineer')
+            for u in engineer_group.user_set.all():
+                Engineer.objects.get_or_create(
+                    user=u,
+                    defaults={
+                        'name': u.get_full_name() or u.username,
+                        'is_active': True,
+                    }
+                )
+        except Group.DoesNotExist:
+            pass
+        self.fields['engineer'].queryset = Engineer.objects.filter(
+            is_active=True,
+            user__groups__name='Engineer'
+        )
         # Handle date restrictions based on MaintenanceRequest
         mr_id = self.initial.get('maintenance_request') or (self.instance.maintenance_request.id if self.instance and self.instance.pk and self.instance.maintenance_request else None)
         if mr_id:

@@ -9,9 +9,11 @@
         <p class="text-muted">Manage and track facility upkeep tasks.</p>
     </div>
     <div class="action-btn-group">
+        {% if not is_officer %}
         <a href="{% url 'request_create' %}" class="btn btn-primary create-btn">
             <i class="fas fa-plus-circle"></i> NEW REQUEST
         </a>
+        {% endif %}
     </div>
 </div>
 
