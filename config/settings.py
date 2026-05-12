@@ -187,8 +187,8 @@ AWS_STORAGE_BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'medilab')
 AWS_S3_ENDPOINT_URL = os.getenv('R2_ENDPOINT_URL', '')
 AWS_S3_REGION_NAME = 'auto'  # Cloudflare R2 uses 'auto' for region
 AWS_S3_SIGNATURE_VERSION = 's3v4'
-AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = 'public-read'  # Make uploaded files publicly accessible
+AWS_S3_FILE_OVERWRITE = True  # Skip HeadObject pre-check; filenames are unique by design
+AWS_DEFAULT_ACL = None  # R2 does not support S3-style ACLs
 AWS_S3_VERIFY = True
 AWS_QUERYSTRING_AUTH = False  # Don't add auth params to URLs
 AWS_S3_OBJECT_PARAMETERS = {
@@ -204,10 +204,17 @@ else:
     AWS_S3_CUSTOM_DOMAIN = ''
     MEDIA_URL = '/media/'  # Fallback to prevent crashes, but R2 credentials are required for functionality
 
-# Always use R2 for media file storage
+# Use R2 for media storage only when credentials are configured; fall back to
+# local filesystem storage for development without R2 credentials.
+_r2_configured = bool(AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_S3_ENDPOINT_URL)
+
 STORAGES = {
     'default': {
-        'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+        'BACKEND': (
+            'storages.backends.s3boto3.S3Boto3Storage'
+            if _r2_configured
+            else 'django.core.files.storage.FileSystemStorage'
+        ),
     },
     'staticfiles': {
         'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',

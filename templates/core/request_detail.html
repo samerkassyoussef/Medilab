@@ -44,7 +44,7 @@
             {% endif %}
         {% endif %}
         
-        {% if is_engineer %}
+        {% if has_assignment and is_engineer or has_assignment and is_engineering_manager %}
         <a href="{% url 'report_create' %}?request_id={{ request.pk }}" class="detail-action-btn btn-premium-success">
             <i class="fas fa-plus-circle"></i> Create Service Report
         </a>
@@ -53,8 +53,8 @@
         <button class="detail-action-btn btn-premium-outline" onclick="window.print()">
             <i class="fas fa-print"></i> Print Details
         </button>
-        
-        {% if user.is_staff or is_engineering_manager %}
+
+        {% if not has_assignment and user.is_staff or not has_assignment and is_engineering_manager %}
         <a href="{% url 'maintenance_assignment_create' %}?request_id={{ request.pk }}" class="detail-action-btn btn-premium-primary">
             <i class="fas fa-calendar-check"></i> Allocate Engineer
         </a>

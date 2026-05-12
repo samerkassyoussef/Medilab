@@ -480,11 +480,18 @@ class ServiceReportCreateView(DriverRedirectMixin, LoginRequiredMixin, UserPasse
                         expiration_date = start_date.replace(year=start_date.year + self.object.warranty_duration_years)
                     except ValueError:
                         expiration_date = start_date + timedelta(days=self.object.warranty_duration_years * 365 + (self.object.warranty_duration_years // 4))
-                    
+
                     for item in self.object.items.all():
                         if item.equipment:
                             item.equipment.warranty_expiration_date = expiration_date.date()
                             item.equipment.save()
+
+                # Close the maintenance request when report is submitted or completed
+                mr = self.object.maintenance_request
+                if mr and self.object.status in ('Pending', 'Completed'):
+                    if mr.status not in ('Completed', 'Cancelled'):
+                        mr.status = 'Completed'
+                        mr.save(update_fields=['status'])
             return redirect(self.success_url)
         return self.render_to_response(self.get_context_data(form=form))
 
@@ -543,11 +550,18 @@ class ServiceReportUpdateView(DriverRedirectMixin, LoginRequiredMixin, UserPasse
                         expiration_date = start_date.replace(year=start_date.year + self.object.warranty_duration_years)
                     except ValueError:
                         expiration_date = start_date + timedelta(days=self.object.warranty_duration_years * 365 + (self.object.warranty_duration_years // 4))
-                    
+
                     for item in self.object.items.all():
                         if item.equipment:
                             item.equipment.warranty_expiration_date = expiration_date.date()
                             item.equipment.save()
+
+                # Close the maintenance request when report is submitted or completed
+                mr = self.object.maintenance_request
+                if mr and self.object.status in ('Pending', 'Completed'):
+                    if mr.status not in ('Completed', 'Cancelled'):
+                        mr.status = 'Completed'
+                        mr.save(update_fields=['status'])
             return redirect(self.success_url)
         return self.render_to_response(self.get_context_data(form=form))
 
@@ -749,11 +763,13 @@ class MaintenanceRequestDetailView(DriverRedirectMixin, LoginRequiredMixin, Deta
         ).prefetch_related(
             'equipment_items__equipment__product',
             'service_reports',
+            'assignments',
         )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['is_engineer'] = self.request.session.get('is_engineer', False)
+        context['has_assignment'] = self.object.assignments.exists()
         return context
 
 
